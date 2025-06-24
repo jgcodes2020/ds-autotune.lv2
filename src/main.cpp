@@ -32,7 +32,11 @@ constexpr const char* DS_AUTOTUNE_URI =
 
 class DsAutotune : public lvtk::Plugin<DsAutotune> {
 public:
-  enum PortID : uint32_t { PORT_INPUT, PORT_OUTPUT, PORT_EST_FREQ, PORT_DIP_THRESH };
+  enum PortID : uint32_t {
+    PORT_INPUT,
+    PORT_OUTPUT,
+    PORT_EST_FREQ
+  };
 
   DsAutotune(const lvtk::Args& args);
 
@@ -55,7 +59,6 @@ private:
   const float* mp_input;
   float* mp_output;
   float* mp_est_freq;
-  const float* mp_dip_thresh;
 
   // parameters
   double m_sample_rate;
@@ -117,9 +120,6 @@ void DsAutotune::connect_port(uint32_t port, void* data) {
       break;
     case DsAutotune::PORT_EST_FREQ:
       mp_est_freq = (float*) data;
-      break;
-    case DsAutotune::PORT_DIP_THRESH:
-      mp_dip_thresh = (const float*) data;
       break;
   }
 }
@@ -193,7 +193,8 @@ void DsAutotune::analyze_block() {
 
   // halves of tb0
   auto tb0_h0 = xt::view(m_tbuffer0, xt::range(0, 2 * dsat::BLOCK_SIZE));
-  auto tb0_h1 = xt::view(m_tbuffer0, xt::range(2 * dsat::BLOCK_SIZE, 4 * dsat::BLOCK_SIZE));
+  auto tb0_h1 =
+    xt::view(m_tbuffer0, xt::range(2 * dsat::BLOCK_SIZE, 4 * dsat::BLOCK_SIZE));
 
   // first half of tb1
   auto tb1_h0 = xt::view(m_tbuffer1, xt::range(0, dsat::BLOCK_SIZE));
@@ -245,8 +246,10 @@ void DsAutotune::analyze_block() {
   }
 
   // submit estimated period to output
-  auto period = dsat::find_period(tb1_h0, 2048, *mp_dip_thresh);
-  *mp_est_freq = (period != 0)? m_sample_rate / period : 0.0f;
+  auto period  = dsat::est_period(tb1_h0, 1024) * 2;
+  *mp_est_freq = (period != 0)
+    ? m_sample_rate / dsat::refine_est_period(tb1_h0, period)
+    : 0.0f;
 }
 
 static const lvtk::Descriptor<DsAutotune> ds_autotune {DS_AUTOTUNE_URI};

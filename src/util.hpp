@@ -2,6 +2,7 @@
 #include <fftw3.h>
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -32,12 +33,16 @@ namespace dsat {
   }
 
   template <class E>
-  inline size_t find_period(const E& cmndf, size_t max_period, float thresh = dsat::DIP_THRESHOLD) {
+  inline size_t est_period(const E& cmndf, size_t max_period, float thresh = dsat::DIP_THRESHOLD) {
     size_t period = 0;
+    // maximum period we can detect is limited by our block size.
     max_period = std::min(max_period, dsat::BLOCK_SIZE - 1);
+    // search for a suitable period (< max_period).
     while (period < max_period) {
       ++period;
-      if (cmndf[period] > thresh) {
+      // A suitable period should dip below our set threshold.
+      if (cmndf[period] < thresh) {
+        // Advance to a local minimum.
         while ((period < max_period) && (cmndf[period] > cmndf[period + 1]))
           ++period;
         return period;
@@ -45,4 +50,22 @@ namespace dsat {
     }
     return 0;
   }
+
+  template <class E>
+  inline float refine_est_period(const E& cmndf, size_t est) {
+    assert(est > 0);
+
+    // Treat the sample cmndf[est] as t = 0. Quadratically interpolate
+    // using the two neighbour samples to compute an offset.
+    float p = cmndf[est - 1];
+    float q = cmndf[est];
+    float r = cmndf[est + 1];
+
+    // offset
+    float offset = (p - r) * 0.5 / (p + r - 2 * q);
+    assert(-1.0 < offset && offset < 1.0f);
+
+    return (float) est + offset;
+  }
+
 }  // namespace dsat

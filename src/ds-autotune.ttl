@@ -39,14 +39,4 @@
         lv2:maximum 500.0;
 
         units:unit units:hz
-    ] , [
-        a lv2:InputPort , lv2:ControlPort ;
-        lv2:index 3 ;
-        
-        lv2:symbol "dip_thresh" ;
-        lv2:name "CMNDF dip threshold" ;
-
-        lv2:default 0.1;
-        lv2:minimum 0.01;
-        lv2:maximum 0.5;
     ] .
