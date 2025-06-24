@@ -1,0 +1,39 @@
+@prefix owl: <http://www.w3.org/2002/07/owl#>.
+@prefix bufsz: <http://lv2plug.in/ns/ext/buf-size#> .
+@prefix doap: <http://usefulinc.com/ns/doap#> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+@prefix lv2: <http://lv2plug.in/ns/lv2core#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix units: <http://lv2plug.in/ns/extensions/units#> .
+
+<https://github.com/jgcodes2020/ds-autotune.lv2> a lv2:Plugin , lv2:PitchPlugin , doap:Project ;
+    doap:name "DS Autotune" ;
+    doap:maintainer [
+        a foaf:Person ;
+        foaf:name "Jacky Guo" ;
+        foaf:mbox <mailto:j349guo@uwaterloo.ca> ;
+    ] ;
+    lv2:optionalFeature lv2:hardRTCapable ;
+
+    lv2:port [
+        a lv2:InputPort , lv2:AudioPort ;
+        lv2:index 0 ;
+
+        lv2:symbol "input" ;
+        lv2:name "Audio in" ;
+    ] , [
+        a lv2:OutputPort , lv2:AudioPort ;
+        lv2:index 1 ;
+
+        lv2:symbol "output" ;
+        lv2:name "Audio out" ;
+    ] , [
+        a lv2:OutputPort , lv2:ControlPort ;
+        lv2:index 2 ;
+        
+        lv2:symbol "est_freq" ;
+        lv2:name "Estimated frequency" ;
+
+        units:unit units:hz
+    ] .
