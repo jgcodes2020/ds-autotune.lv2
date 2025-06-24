@@ -2,6 +2,9 @@
 #include <array>
 #include <complex>
 #include <cstdlib>
+#include <iostream>
+#include <print>
+#include <utility>
 
 #include <fftw3.h>
 #include <lv2/core/lv2.h>
@@ -16,6 +19,7 @@
 #include <xtensor/containers/xstorage.hpp>
 #include <xtensor/core/xeval.hpp>
 #include <xtensor/core/xmath.hpp>
+#include <xtensor/core/xnoalias.hpp>
 #include <xtensor/core/xtensor_forward.hpp>
 #include <xtensor/generators/xbuilder.hpp>
 #include <xtensor/misc/xcomplex.hpp>
@@ -28,7 +32,7 @@ constexpr const char* DS_AUTOTUNE_URI =
 
 class DsAutotune : public lvtk::Plugin<DsAutotune> {
 public:
-  enum PortID : uint32_t { PORT_INPUT, PORT_OUTPUT, PORT_EST_FREQ };
+  enum PortID : uint32_t { PORT_INPUT, PORT_OUTPUT, PORT_EST_FREQ, PORT_DIP_THRESH };
 
   DsAutotune(const lvtk::Args& args);
 
@@ -51,37 +55,57 @@ private:
   const float* mp_input;
   float* mp_output;
   float* mp_est_freq;
+  const float* mp_dip_thresh;
 
   // parameters
   double m_sample_rate;
 
-  // real buffers. m_buffer0 stores input blocks before they are processed.
-  xt::xtensor<float, 1> m_buffer0;
-
-  // complex buffers.
-  xt::xtensor<std::complex<float>, 1> m_cbuffer0;
-
   // Index into buffer0 for input.
-  size_t m_buffer0_idx;
-  // FFTW plan for transforming m_buffer0 to m_cbuffer0.
-  dsat::fftwf_plan_ptr m_fft_fwd;
+  size_t m_ibuffer_idx;
+
+  // input buffers
+  xt::xtensor<float, 1> m_ibuffer0;
+  xt::xtensor<float, 1> m_ibuffer1;
+
+  // temp real buffers
+  xt::xtensor<float, 1> m_tbuffer0;
+  xt::xtensor<float, 1> m_tbuffer1;
+
+  // temp complex buffers.
+  xt::xtensor<std::complex<float>, 1> m_tcbuffer0;
+  xt::xtensor<std::complex<float>, 1> m_tcbuffer1;
+
+  // FFTW plan: m_tcbuffer0 = FFT(m_buffer0)
+  dsat::fftwf_plan_ptr m_fft_fwd_long;
+  // FFTW plan: m_tcbuffer1 = FFT(m_buffer0)
+  dsat::fftwf_plan_ptr m_fft_fwd_short;
+  // FFTW plan: m_buffer0 = IFFT(m_cbuffer0)
   dsat::fftwf_plan_ptr m_fft_rev;
 };
 
 DsAutotune::DsAutotune(const lvtk::Args& args) :
   Plugin(args),
   m_sample_rate(args.sample_rate),
-  m_buffer0({dsat::BLOCK_SIZE * 2}, 0),
-  m_cbuffer0({dsat::BLOCK_SIZE * 2}, 0),
-  m_buffer0_idx(0),
-  m_fft_fwd(
+  m_ibuffer_idx(0),
+  m_ibuffer0({dsat::BLOCK_SIZE}, 0),
+  m_ibuffer1({dsat::BLOCK_SIZE}, 0),
+  m_tbuffer0({dsat::BLOCK_SIZE * 4}, 0),
+  m_tbuffer1({dsat::BLOCK_SIZE * 2}, 0),
+  m_tcbuffer0({dsat::BLOCK_SIZE * 2 + 1}, 0),
+  m_tcbuffer1({dsat::BLOCK_SIZE * 2 + 1}, 0),
+  m_fft_fwd_long(
     dsat::wrap_fftwf(fftwf_plan_dft_r2c_1d(
-      dsat::BLOCK_SIZE * 2, m_buffer0.data(),
-      reinterpret_cast<fftwf_complex*>(m_cbuffer0.data()), FFTW_ESTIMATE))),
+      dsat::BLOCK_SIZE * 4, m_tbuffer0.data(),
+      reinterpret_cast<fftwf_complex*>(m_tcbuffer0.data()), FFTW_ESTIMATE))),
+  m_fft_fwd_short(
+    dsat::wrap_fftwf(fftwf_plan_dft_r2c_1d(
+      dsat::BLOCK_SIZE * 4, m_tbuffer0.data(),
+      reinterpret_cast<fftwf_complex*>(m_tcbuffer1.data()), FFTW_ESTIMATE))),
   m_fft_rev(
     dsat::wrap_fftwf(fftwf_plan_dft_c2r_1d(
-      dsat::BLOCK_SIZE * 2, reinterpret_cast<fftwf_complex*>(m_cbuffer0.data()),
-      m_buffer0.data(), FFTW_ESTIMATE))) {}
+      dsat::BLOCK_SIZE * 4,
+      reinterpret_cast<fftwf_complex*>(m_tcbuffer0.data()), m_tbuffer0.data(),
+      FFTW_ESTIMATE))) {}
 
 void DsAutotune::connect_port(uint32_t port, void* data) {
   switch (port) {
@@ -94,12 +118,21 @@ void DsAutotune::connect_port(uint32_t port, void* data) {
     case DsAutotune::PORT_EST_FREQ:
       mp_est_freq = (float*) data;
       break;
+    case DsAutotune::PORT_DIP_THRESH:
+      mp_dip_thresh = (const float*) data;
+      break;
   }
 }
 
 void DsAutotune::activate() {
-  xt::noalias(m_buffer0) = xt::zeros<float>(m_buffer0.shape());
-  m_buffer0_idx          = 0;
+  dsat::zero_buffer(m_ibuffer0);
+  dsat::zero_buffer(m_ibuffer1);
+  dsat::zero_buffer(m_tbuffer0);
+  dsat::zero_buffer(m_tbuffer1);
+  dsat::zero_buffer(m_tcbuffer0);
+  dsat::zero_buffer(m_tcbuffer1);
+
+  m_ibuffer_idx = 0;
 
   *mp_est_freq = 0.0f;
 }
@@ -112,39 +145,108 @@ void DsAutotune::run(uint32_t n_samples) {
 
 void DsAutotune::fill_block(const float* begin, const float* end) {
   using namespace xt::placeholders;
+
+  decltype(m_ibuffer0)::value_type x;
+
   while (begin != end) {
-    size_t n_to_block_end = dsat::BLOCK_SIZE - m_buffer0_idx;
+    size_t n_to_block_end = dsat::BLOCK_SIZE - m_ibuffer_idx;
     size_t n_to_input_end = end - begin;
     if (n_to_input_end >= n_to_block_end) {
       // copy and fill remainder of block
       xt::noalias(
-        xt::view(m_buffer0, xt::range(m_buffer0_idx, dsat::BLOCK_SIZE))) =
+        xt::view(m_ibuffer1, xt::range(m_ibuffer_idx, dsat::BLOCK_SIZE))) =
         dsat::to_xt_adaptor(begin, n_to_block_end);
 
       // push pointer, reset block counter
       begin += n_to_block_end;
-      m_buffer0_idx = 0;
+      m_ibuffer_idx = 0;
 
       // swap buffers
       this->analyze_block();
+      std::swap(m_ibuffer0, m_ibuffer1);
     }
     else {
       // not enough samples to fill this block, so fill what we can now
       xt::noalias(
         xt::view(
-          m_buffer0,
-          xt::range(m_buffer0_idx, m_buffer0_idx + n_to_input_end))) =
+          m_ibuffer1,
+          xt::range(m_ibuffer_idx, m_ibuffer_idx + n_to_input_end))) =
         dsat::to_xt_adaptor(begin, n_to_input_end);
 
       // push counters
       begin += n_to_input_end;
-      m_buffer0_idx += n_to_input_end;
+      m_ibuffer_idx += n_to_input_end;
     }
   }
 }
 
 void DsAutotune::analyze_block() {
   using namespace xt::placeholders;
+
+  // USEFUL BUFFER REFS
+  // =======================
+
+  // first two quarters of tb0
+  auto tb0_q0 = xt::view(m_tbuffer0, xt::range(0, dsat::BLOCK_SIZE));
+  auto tb0_q1 =
+    xt::view(m_tbuffer0, xt::range(dsat::BLOCK_SIZE, 2 * dsat::BLOCK_SIZE));
+
+  // halves of tb0
+  auto tb0_h0 = xt::view(m_tbuffer0, xt::range(0, 2 * dsat::BLOCK_SIZE));
+  auto tb0_h1 = xt::view(m_tbuffer0, xt::range(2 * dsat::BLOCK_SIZE, 4 * dsat::BLOCK_SIZE));
+
+  // first half of tb1
+  auto tb1_h0 = xt::view(m_tbuffer1, xt::range(0, dsat::BLOCK_SIZE));
+
+  // ALGORITHM
+  // =======================
+  dsat::zero_buffer(tb0_h1);
+
+  // setup short window in tbuffer0
+  xt::noalias(tb0_q0) = m_ibuffer0;
+  xt::noalias(tb0_q1) = xt::zeros<float>(tb0_q1.shape());
+  // FFT short window => tcbuffer1
+  fftwf_execute(m_fft_fwd_short.get());
+
+  // setup long window
+  xt::noalias(tb0_q1) = m_ibuffer1;
+  // inclusive sum scan x^2 => tbuffer1
+  {
+    auto tb0_h0_clip = xt::view(tb0_h0, xt::range(0, -1));
+    xt::noalias(xt::view(m_tbuffer1, xt::range(1, _))) =
+      xt::cumsum(tb0_h0_clip * tb0_h0_clip);
+  }
+  m_tbuffer1[0] = 0.0f;
+  // FFT long window => tcbuffer0
+  fftwf_execute(m_fft_fwd_long.get());
+
+  // IFFT(long * conj(short)), => tbuffer0
+  xt::noalias(m_tcbuffer0) = m_tcbuffer0 * xt::conj(m_tcbuffer1);
+  fftwf_execute(m_fft_rev.get());
+
+  // DF to tbuffer0
+  {
+    auto a_sq = xt::broadcast(m_tbuffer1[dsat::BLOCK_SIZE], {dsat::BLOCK_SIZE});
+    auto b_sq =
+      xt::view(m_tbuffer1, xt::range(dsat::BLOCK_SIZE, 2 * dsat::BLOCK_SIZE)) -
+      xt::view(m_tbuffer1, xt::range(0, dsat::BLOCK_SIZE));
+    auto ab             = tb0_q0;
+    xt::noalias(tb0_q0) = a_sq + b_sq - 2 * ab;
+  }
+
+  // compute CMNDF to m_tbuffer1
+  {
+    auto csum        = xt::cumsum(xt::view(tb0_q0, xt::range(0, -1)));
+    auto arange      = xt::arange(1.0f, (float) dsat::BLOCK_SIZE);
+    auto tb1_h0_clip = xt::view(tb1_h0, xt::range(1, _));
+
+    xt::noalias(tb1_h0_clip) = tb1_h0_clip * arange / csum;
+    tb1_h0[0]                = 1.0f;
+  }
+
+  // submit estimated period to output
+  auto period = dsat::find_period(tb1_h0, 2048, *mp_dip_thresh);
+  *mp_est_freq = (period != 0)? m_sample_rate / period : 0.0f;
 }
 
 static const lvtk::Descriptor<DsAutotune> ds_autotune {DS_AUTOTUNE_URI};

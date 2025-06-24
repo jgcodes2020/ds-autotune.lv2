@@ -3,7 +3,7 @@ add_library(ds-autotune SHARED
     "util.hpp"
 )
 set_target_properties(ds-autotune PROPERTIES
-    CXX_STANDARD 20
+    CXX_STANDARD 23
     CXX_STANDARD_REQUIRED ON
 )
 lv2v_add_ttl_sources(TARGET ds-autotune FILES
