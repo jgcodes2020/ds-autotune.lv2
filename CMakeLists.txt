@@ -14,7 +14,6 @@ if (NOT is_multiconfig AND NOT CMAKE_BUILD_TYPE)
 endif()
 
 # libraries
-include(ExternalProject)
 include(FetchContent)
 
 # download lvtk off GitHub and wrangle it into working
@@ -34,21 +33,15 @@ FetchContent_Declare(xtensor
     GIT_TAG "3634f2ded19e0cf38208c8b86cea9e1d7c8e397d"
     FIND_PACKAGE_ARGS
 )
-# FetchContent_Declare(xtensor-fftw
-#     GIT_REPOSITORY "https://github.com/xtensor-stack/xtensor-fftw.git"
-#     GIT_TAG "127aae73d9def7d421045d1fe5cf6b9c73da3542"
-# )
 FetchContent_MakeAvailable(lvtk xtensor)
 
 FetchContent_GetProperties(lvtk SOURCE_DIR lvtk_srcdir)
+
+find_package(FFTW3 REQUIRED)
+
 add_library(lvtk_lib INTERFACE IMPORTED)
 target_include_directories(lvtk_lib INTERFACE "${lvtk_srcdir}/include")
 add_library(lvtk::lvtk ALIAS lvtk_lib)
-
-# FetchContent_GetProperties(xtensor-fftw SOURCE_DIR xtensor_fftw_srcdir)
-# add_library(xtensor_fftw_lib INTERFACE IMPORTED)
-# target_include_directories(xtensor_fftw_lib INTERFACE "${xtensor_fftw_srcdir}/include")
-# add_library(xtensor_fftw::xtensor_fftw ALIAS xtensor_fftw_lib)
 
 include("cmake/Lv2Validation.cmake")
 

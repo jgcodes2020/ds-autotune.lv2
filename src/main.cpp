@@ -16,16 +16,6 @@
 #include <lvtk/plugin.hpp>
 
 #include "util.hpp"
-#include <xtensor/containers/xstorage.hpp>
-#include <xtensor/core/xeval.hpp>
-#include <xtensor/core/xmath.hpp>
-#include <xtensor/core/xnoalias.hpp>
-#include <xtensor/core/xtensor_forward.hpp>
-#include <xtensor/generators/xbuilder.hpp>
-#include <xtensor/misc/xcomplex.hpp>
-#include <xtensor/views/xbroadcast.hpp>
-#include <xtensor/views/xslice.hpp>
-#include <xtensor/views/xview.hpp>
 
 constexpr const char* DS_AUTOTUNE_URI =
   "https://github.com/jgcodes2020/ds-autotune.lv2";
@@ -205,7 +195,7 @@ void DsAutotune::analyze_block() {
 
   // setup short window in tbuffer0
   xt::noalias(tb0_q0) = m_ibuffer0;
-  xt::noalias(tb0_q1) = xt::zeros<float>(tb0_q1.shape());
+  dsat::zero_buffer(tb0_q1);
   // FFT short window => tcbuffer1
   fftwf_execute(m_fft_fwd_short.get());
 
@@ -246,7 +236,7 @@ void DsAutotune::analyze_block() {
   }
 
   // submit estimated period to output
-  auto period  = dsat::est_period(tb1_h0, 1024) * 2;
+  auto period  = dsat::est_period(tb1_h0, 1024);
   *mp_est_freq = (period != 0)
     ? m_sample_rate / dsat::refine_est_period(tb1_h0, period)
     : 0.0f;
