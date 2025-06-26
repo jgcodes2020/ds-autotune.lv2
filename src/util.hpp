@@ -1,17 +1,15 @@
 
 #include <fftw3.h>
-#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstddef>
 #include <memory>
-#include <optional>
 #include <type_traits>
+#include <xsimd/xsimd.hpp>
 #include <xtensor.hpp>
-#include <xtensor/core/xtensor_forward.hpp>
-#include <xtensor/views/xslice.hpp>
+
 namespace dsat {
-  constexpr size_t BLOCK_SIZE   = 4096;
+  constexpr size_t BLOCK_SIZE   = 1280;
   constexpr float DIP_THRESHOLD = 0.1f;
 
   using fftwf_plan_ptr =
@@ -34,6 +32,7 @@ namespace dsat {
     xt::noalias(buffer) = xt::zeros<typename E::value_type>(buffer.shape());
   }
 
+  #if 0
   // Estimates the period given a calculation of the CMNDF.
   template <class E>
   inline size_t est_period(
@@ -41,20 +40,45 @@ namespace dsat {
     requires std::is_same_v<typename E::value_type, float>
   {
     size_t period = 0;
-    max_period = std::min(max_period, dsat::BLOCK_SIZE);
+    max_period = dsat::BLOCK_SIZE;
     // search for a suitable period (< max_period).
     while (period < max_period) {
-      ++period;
       // A suitable period should dip below our set threshold.
       if (cmndf[period] < thresh) {
+        std::println(std::cout, "found thresh {}", period);
         // Advance to a local minimum.
         while ((period < max_period) && (cmndf[period] > cmndf[period + 1]))
           ++period;
+        std::println(std::cout, "found local min {}", period);
         return period;
       }
+      ++period;
     }
     return 0;
   }
+
+  #else
+  // Estimates the period given a calculation of the CMNDF.
+  template <class E>
+  inline size_t est_period(
+    const E& cmndf, size_t max_period, float thresh = dsat::DIP_THRESHOLD)
+    requires std::is_same_v<typename E::value_type, float>
+  {
+    using namespace xt::placeholders;
+
+    // find first threshold point
+    size_t thresh_idx = xt::argmax(cmndf < thresh)();
+    if (thresh_idx == 0)
+      return 0;
+
+    // find local min
+    size_t local_min_idx = xt::argmax(
+      xt::view(cmndf, xt::range(thresh_idx, -1)) <
+      xt::view(cmndf, xt::range(thresh_idx + 1, _))
+    )();
+    return thresh_idx + local_min_idx;
+  }
+#endif
 
   // Refines a sample-accurate estimate of period by quadratic interpolation.
   template <class E>

@@ -28,6 +28,11 @@ FetchContent_Declare(xtl
     GIT_TAG "3634f2ded19e0cf38208c8b86cea9e1d7c8e397d"
     FIND_PACKAGE_ARGS
 )
+FetchContent_Declare(xsimd
+    GIT_REPOSITORY "https://github.com/xtensor-stack/xsimd.git"
+    GIT_TAG "1f8dd9c8e162968d9b4ff0251c56d431b8777f36"
+    FIND_PACKAGE_ARGS
+)
 FetchContent_Declare(xtensor
     GIT_REPOSITORY "https://github.com/xtensor-stack/xtensor.git"
     GIT_TAG "3634f2ded19e0cf38208c8b86cea9e1d7c8e397d"
