@@ -240,7 +240,7 @@ void DsAutotune::analyze_block() {
     auto a_sq = xt::broadcast(m_tbuffer1[dsat::BLOCK_SIZE], {dsat::BLOCK_SIZE});
     auto b_sq = tb1_h1 - tb1_h0;
 
-    xt::noalias(tb0_q0) = a_sq + b_sq - tb0_q0 * 2.0f;
+    xt::noalias(tb0_q0) = xt::fma(-tb0_q0, 2.0f, a_sq + b_sq);
   }
 
   // compute CMNDF to m_tbuffer1
